@@ -13,12 +13,12 @@ from keras.layers import Dense, LSTM, Dropout
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils import get_historical_data, add_features
 
-def predict_and_save_with_features(coin_id, vs_currency, days, features, file_path):
+def predict_and_save_with_features(coin_id, vs_currency, features, file_path):
     # Kiểm tra và tạo thư mục nếu cần
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
     # Lấy dữ liệu lịch sử
-    df = get_historical_data(coin_id, vs_currency, days, 14)
+    df = get_historical_data(coin_id, vs_currency)
     
     # Thêm các đặc trưng
     df = add_features(df, features)
@@ -53,6 +53,10 @@ def predict_and_save_with_features(coin_id, vs_currency, days, features, file_pa
 
     model.compile(optimizer='adam', loss='mean_squared_error')
     model.fit(x_train, y_train, batch_size=32, epochs=10)
+
+    model_name = f'{coin_id}_{"_".join(features)}.h5'
+    model_path = os.path.join('model/LSTM', model_name)
+    model.save(model_path)
 
     test_data = scaled_data[training_data_len - 60:, :]
     x_test = []

@@ -50,12 +50,12 @@ class TransformerModel(nn.Module):
         out = out.permute(1, 0, 2)  # Convert back to (batch_size, seq_len, embed_dim)
         return self.fc(out[:, -1, :])  # Use the output of the last time step
 
-def predict_and_save_with_features(coin_id, vs_currency, days, features, file_path):
+def predict_and_save_with_features(coin_id, vs_currency, features, file_path):
     # Kiểm tra và tạo thư mục nếu cần
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
     # Lấy dữ liệu lịch sử
-    df = get_historical_data(coin_id, vs_currency, days, 14)
+    df = get_historical_data(coin_id, vs_currency)
     
     # Thêm các đặc trưng
     df = add_features(df, features)
@@ -112,6 +112,12 @@ def predict_and_save_with_features(coin_id, vs_currency, days, features, file_pa
             loss.backward()
             optimizer.step()
 
+    model_name = f'{coin_id}_{"_".join(features)}.pth'
+    model_dir = os.path.join('model', 'Transformer')
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, model_name)
+    torch.save(model.state_dict(), model_path)
+
     model.eval()
     with torch.no_grad():
         predictions = model(x_test).squeeze().numpy()
@@ -134,5 +140,3 @@ def predict_and_save_with_features(coin_id, vs_currency, days, features, file_pa
     print(f'{coin_id.upper()}-{vs_currency.upper()} MAE: {mae}')
     print(f'{coin_id.upper()}-{vs_currency.upper()} MAPE: {mape}%')
 
-# Ví dụ sử dụng:
-# predict_and_save_with_features('bitcoin', 'usd', 365, ['volume', 'market_cap'], 'output.csv')

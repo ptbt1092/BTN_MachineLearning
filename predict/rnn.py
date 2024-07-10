@@ -13,12 +13,12 @@ from keras.layers import Dense, SimpleRNN, Dropout
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils import get_historical_data, add_features
 
-def predict_and_save_with_features(coin_id, vs_currency, days, features, file_path):
+def predict_and_save_with_features(coin_id, vs_currency, features, file_path):
     # Kiểm tra và tạo thư mục nếu cần
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
     # Lấy dữ liệu lịch sử
-    df = get_historical_data(coin_id, vs_currency, days, 14)
+    df = get_historical_data(coin_id, vs_currency)
     
     # Thêm các đặc trưng
     df = add_features(df, features)

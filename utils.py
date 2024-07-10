@@ -1,28 +1,47 @@
+import os
+import websockets
+import json
+from datetime import date
 import pandas as pd
-import requests
+import yfinance as yf
 import ta 
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(60)) 
-def get_historical_data(coin_id, vs_currency, days, n_roc):
-    url = f'https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart'
-    params = {
-        'vs_currency': vs_currency,
-        'days': days
+def get_yf_ticker(coin_id, vs_currency):
+    coin_map = {
+        'bitcoin': 'BTC',
+        'ethereum': 'ETH',
+        'cardano': 'ADA'
     }
-    response = requests.get(url, params=params)
-    response.raise_for_status() 
-    data = response.json()
+    currency_map = {
+        'usd': 'USD'
+    }
+    return f"{coin_map[coin_id.lower()]}-{currency_map[vs_currency.lower()]}"
 
-    prices = data['prices']
-    df = pd.DataFrame(prices, columns=['timestamp', 'price'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
+def get_historical_data(coin_id, vs_currency):
+    # Ánh xạ coin_id và vs_currency sang ticker của yfinance
+    ticker = get_yf_ticker(coin_id, vs_currency)
+
+    # Lấy dữ liệu từ yfinance
+    start_date = '2018-01-01'
+    end_date = date.today()
+    data = yf.download(ticker, start=start_date, end=end_date)
     
-    # Tính toán ROC
-    df['ROC'] = df['price'].pct_change(periods=n_roc) * 100
+    # In tên các cột để kiểm tra
+    print("Columns before renaming:", data.columns)
     
-    return df
+    # Đổi tên các cột
+    data.rename(columns={"Adj Close": "price"}, inplace=True)
+    
+    # Chỉ giữ lại cột giá và thời gian
+    data = data[["price"]]
+    
+    # In lại tên các cột và một vài hàng dữ liệu để kiểm tra
+    print("Columns after renaming:", data.columns)
+    print(data.head())
+    
+    return data
 
 def add_features(df, features):
     if 'ROC' in features:
@@ -41,3 +60,27 @@ def add_features(df, features):
     
     df.dropna(inplace=True)
     return df
+
+async def fetch_real_time_data(symbol, interval='1m'):
+    url = f'wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}'
+    async with websockets.connect(url) as websocket:
+        while True:
+            data = await websocket.recv()
+            data_json = json.loads(data)
+            kline = data_json['k']
+            if kline['x']:  # Check if the kline is closed
+                yield {
+                    'timestamp': pd.to_datetime(kline['t'], unit='ms'),
+                    'open': float(kline['o']),
+                    'high': float(kline['h']),
+                    'low': float(kline['l']),
+                    'close': float(kline['c']),
+                    'volume': float(kline['v'])
+                }
+
+async def update_data(symbol, interval='1m', path='real_time_data.csv'):
+    data_stream = fetch_real_time_data(symbol, interval)
+    async for new_data in data_stream:
+        df = pd.DataFrame([new_data])
+        df.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
+        print(f"Appended new data: {new_data}")
