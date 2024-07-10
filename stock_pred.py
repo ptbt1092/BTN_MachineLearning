@@ -30,16 +30,16 @@ for coin in coins:
     for features in features_list:
         file_suffix = '_'.join([f.lower().replace('/', '') for f in features])
         # LSTM
-        # file_path = f'./output/LSTM/{coin}_{file_suffix}.csv'
-        # predict_and_save_with_features(coin, 'usd', features, file_path)
+        file_path = f'./output/LSTM/{coin}_{file_suffix}.csv'
+        predict_and_save_with_features(coin, 'usd', features, file_path)
         
         # RNN
-        # file_path = f'./output/RNN/{coin}_{file_suffix}.csv'
-        # rnn_predict(coin, 'usd', 365, features, file_path)
+        file_path = f'./output/RNN/{coin}_{file_suffix}.csv'
+        rnn_predict(coin, 'usd', features, file_path)
         
         # XGBoost
-        # file_path = f'./output/XGBoost/{coin}_{file_suffix}.csv'
-        # xgboost_predict(coin, 'usd', 365, features, file_path)
+        file_path = f'./output/XGBoost/{coin}_{file_suffix}.csv'
+        xgboost_predict(coin, 'usd', features, file_path)
         
         # Transformer and Time Embeddings
         file_path = f'./output/Transformer/{coin}_{file_suffix}.csv'

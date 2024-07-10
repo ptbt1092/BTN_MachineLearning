@@ -316,32 +316,31 @@ def update_next_prediction(selected_dropdown, radio_items_value, checklist_value
         df["Date"] = pd.to_datetime(df["Date"], infer_datetime_format=True, errors='coerce')
         df.set_index('Date', inplace=True)
 
-        # Chia dataframe thành các phần 7 ngày
-        start_idx = n_clicks * 30
-        end_idx = start_idx + 30
-        df_segment = df.iloc[start_idx:end_idx]
+        # Nhóm dữ liệu theo ngày và lọc những nhóm có đủ 24 dòng
+        grouped = df.groupby(df.index.date)
+        filtered_groups = [group for name, group in grouped if len(group) == 24]
 
-        # Tạo timestamp tiếp theo
-        if end_idx < len(df):
-            next_timestamp = df.index[end_idx]
-            next_candle_prediction = df["Predictions"].iloc[end_idx]
-        else:
-            next_timestamp = df.index[-1] + pd.Timedelta(days=1)
-            next_candle_prediction = df["Predictions"].iloc[-1]
+        # Kiểm tra nếu có nhóm đủ 24 dòng
+        if len(filtered_groups) > n_clicks:
+            df_segment = filtered_groups[n_clicks]
 
-        # traces.append(
-        #     go.Scatter(x=df_segment.index, y=df_segment["price"], mode='lines', name=f'Actual price of {dropdown[pair]}'))
-        traces.append(
-            go.Scatter(x=df_segment.index, y=df_segment["Predictions"], mode='markers+lines', name=f'Predicted price of {dropdown[pair]}'))
-        # traces.append(
-        #     go.Scatter(x=[next_timestamp], y=[next_candle_prediction], mode='markers+lines',
-        #                name=f'Next predicted price of {dropdown[pair]}'))
+            # Tạo tickvals và ticktext để định dạng trục x
+            tickvals = df_segment.index[::4] 
+            ticktext = [tickvals[0].strftime('%b %d, %Y, %H:%M')]
+            ticktext.extend([t.strftime('%H:%M') for t in tickvals[1:]])
+
+            traces.append(
+                go.Scatter(x=df_segment.index, y=df_segment["Predictions"], mode='markers+lines', name=f'Predicted price of {dropdown[pair]}'))
 
     figure = {'data': traces,
               'layout': go.Layout(colorway=["#f61111", '#00ff51', '#f0ff00',
                                             '#8900ff', '#00d2ff', '#ff7400'],
                                   height=600,
-                                  xaxis={"title": "Date"},
+                                  xaxis={
+                                      "title": "Date",
+                                      'tickvals': tickvals,
+                                      'ticktext': ticktext,
+                                  },
                                   yaxis={"title": "Price (USD)"})}
     return figure
 

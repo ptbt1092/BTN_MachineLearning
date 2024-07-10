@@ -24,22 +24,16 @@ def get_historical_data(coin_id, vs_currency):
     ticker = get_yf_ticker(coin_id, vs_currency)
 
     # Lấy dữ liệu từ yfinance
-    start_date = '2018-01-01'
-    end_date = date.today()
-    data = yf.download(ticker, start=start_date, end=end_date)
-    
-    # In tên các cột để kiểm tra
-    print("Columns before renaming:", data.columns)
-    
+    # start_date = '2018-01-01'
+    # end_date = date.today()
+    # data = yf.download(ticker, start=start_date, end=end_date)
+    data = yf.download(ticker, period='3mo', interval='1h')
+
     # Đổi tên các cột
     data.rename(columns={"Adj Close": "price"}, inplace=True)
     
     # Chỉ giữ lại cột giá và thời gian
     data = data[["price"]]
-    
-    # In lại tên các cột và một vài hàng dữ liệu để kiểm tra
-    print("Columns after renaming:", data.columns)
-    print(data.head())
     
     return data
 
@@ -84,3 +78,6 @@ async def update_data(symbol, interval='1m', path='real_time_data.csv'):
         df = pd.DataFrame([new_data])
         df.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
         print(f"Appended new data: {new_data}")
+
+
+get_historical_data('bitcoin','usd')
