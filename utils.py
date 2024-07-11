@@ -108,37 +108,45 @@ async def fetch_real_time_data(symbol, interval='1m'):
                 yield new_data
 
 async def append_real_time_data_and_predict(symbol, num_predictions=10):
-    if os.path.exists('real_time_data.csv') and os.stat('real_time_data.csv').st_size != 0:
-        data = pd.read_csv('real_time_data.csv', parse_dates=['timestamp'], index_col='timestamp')
+    file_path = 'real_time_data.csv'
+    
+    # Kiểm tra nếu file CSV tồn tại và có dữ liệu
+    if os.path.exists(file_path) and os.stat(file_path).st_size != 0:
+        data = pd.read_csv(file_path, parse_dates=['timestamp'], index_col='timestamp')
     else:
         data = pd.DataFrame(columns=['timestamp', 'close'])
         data.set_index('timestamp', inplace=True)
-
+    
     async for new_data in fetch_real_time_data(symbol):
         new_row = pd.DataFrame([new_data])
         new_row.set_index('timestamp', inplace=True)
-
-        data = pd.concat([data, new_row])
-        data = add_features(data, ['ROC'])
-        logging.info(f"Appended new row, total records: {len(data)}")
-        data[['close']].to_csv('real_time_data.csv', mode='a', header=False, index=True)
-
+        
+        # Kiểm tra trùng lặp dữ liệu theo timestamp
+        if new_row.index[-1] not in data.index:
+            data = pd.concat([data, new_row])
+            data = add_features(data, ['ROC'])
+            logging.info(f"Appended new row, total records: {len(data)}")
+            
+            # Lưu lại toàn bộ dữ liệu vào file CSV (loại bỏ trùng lặp)
+            data = data[~data.index.duplicated(keep='last')]
+            data[['close']].to_csv(file_path, mode='w', header=True, index=True)
+        
         predictions = []
         last_60_candles = data[-60:].values
-
+        
         for _ in range(num_predictions):
             scaled_data = scaler.transform(last_60_candles)
             X_test = np.reshape(scaled_data, (1, 60, scaled_data.shape[1]))
-
+            
             # Dự đoán giá nến kế tiếp
             predicted_price_scaled = model.predict(X_test)
             predicted_price = scaler.inverse_transform(
                 np.concatenate((predicted_price_scaled, np.zeros((predicted_price_scaled.shape[0], scaled_data.shape[1] - 1))), axis=1)
             )[:, 0]
-
+            
             predictions.append(predicted_price[0])
-
+            
             # Thêm giá trị dự đoán vào last_60_candles để dự đoán giá trị tiếp theo
             last_60_candles = np.append(last_60_candles[1:], [[predicted_price[0], last_60_candles[-1][1]]], axis=0)
-
+        
         return predictions
