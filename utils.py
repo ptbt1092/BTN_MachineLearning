@@ -1,13 +1,40 @@
 import os
 import websockets
 import json
-from datetime import date
+import asyncio
 import pandas as pd
 import yfinance as yf
-import ta 
+import ta
+import logging
 from tenacity import retry, stop_after_attempt, wait_fixed
+from datetime import datetime
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import Dense, LSTM, Dropout
 
-@retry(stop=stop_after_attempt(5), wait=wait_fixed(60)) 
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO)
+
+def add_features(df, features):
+    if 'ROC' in features:
+        df['ROC'] = df['close'].pct_change(periods=14) * 100
+    if 'RSI' in features:
+        df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    if 'Bollinger Bands' in features:
+        bb_indicator = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+        df['BB_high'] = bb_indicator.bollinger_hband()
+        df['BB_low'] = bb_indicator.bollinger_lband()
+    if 'Moving Average' in features:
+        df['MA'] = df['close'].rolling(window=20).mean()
+    if 'Support/Resistance' in features:
+        df['Support'] = df['close'].rolling(window=20).min()
+        df['Resistance'] = df['close'].rolling(window=20).max()
+    
+    df.dropna(inplace=True)
+    return df
+
+@retry(stop=stop_after_attempt(5), wait=wait_fixed(60))
 def get_yf_ticker(coin_id, vs_currency):
     coin_map = {
         'bitcoin': 'BTC',
@@ -20,64 +47,98 @@ def get_yf_ticker(coin_id, vs_currency):
     return f"{coin_map[coin_id.lower()]}-{currency_map[vs_currency.lower()]}"
 
 def get_historical_data(coin_id, vs_currency):
-    # Ánh xạ coin_id và vs_currency sang ticker của yfinance
     ticker = get_yf_ticker(coin_id, vs_currency)
-
-    # Lấy dữ liệu từ yfinance
-    # start_date = '2018-01-01'
-    # end_date = date.today()
-    # data = yf.download(ticker, start=start_date, end=end_date)
     data = yf.download(ticker, period='3mo', interval='1h')
-
-    # Đổi tên các cột
-    data.rename(columns={"Adj Close": "price"}, inplace=True)
-    
-    # Chỉ giữ lại cột giá và thời gian
-    data = data[["price"]]
-    
+    data.rename(columns={"Adj Close": "close"}, inplace=True)
+    data = data[['close']]
+    data.reset_index(inplace=True)
     return data
 
-def add_features(df, features):
-    if 'ROC' in features:
-        df['ROC'] = df['price'].pct_change(periods=14) * 100
-    if 'RSI' in features:
-        df['RSI'] = ta.momentum.RSIIndicator(df['price'], window=14).rsi()
-    if 'Bollinger Bands' in features:
-        bb_indicator = ta.volatility.BollingerBands(df['price'], window=20, window_dev=2)
-        df['BB_high'] = bb_indicator.bollinger_hband()
-        df['BB_low'] = bb_indicator.bollinger_lband()
-    if 'Moving Average' in features:
-        df['MA'] = df['price'].rolling(window=20).mean()
-    if 'Support/Resistance' in features:
-        df['Support'] = df['price'].rolling(window=20).min()
-        df['Resistance'] = df['price'].rolling(window=20).max()
-    
+def train_model_once(coin_id, vs_currency, features):
+    global model, scaler, training_data_len, dataset
+    df = get_historical_data(coin_id, vs_currency)
+    df = add_features(df, features)
     df.dropna(inplace=True)
-    return df
+
+    data = df.filter(['close'] + features)
+    dataset = data.values
+    training_data_len = int(np.ceil(len(dataset) * .8))
+
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(dataset)
+
+    train_data = scaled_data[0:training_data_len, :]
+    x_train = []
+    y_train = []
+
+    for i in range(60, len(train_data)):
+        x_train.append(train_data[i-60:i])
+        y_train.append(train_data[i, 0])
+
+    x_train, y_train = np.array(x_train), np.array(y_train)
+    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], x_train.shape[2]))
+
+    model = Sequential()
+    model.add(LSTM(50, return_sequences=True, input_shape=(x_train.shape[1], x_train.shape[2])))
+    model.add(Dropout(0.2))
+    model.add(LSTM(50, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(25))
+    model.add(Dense(1))
+
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(x_train, y_train, batch_size=32, epochs=10)
+
+    logging.info("Model trained and scaler initialized")
 
 async def fetch_real_time_data(symbol, interval='1m'):
     url = f'wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}'
     async with websockets.connect(url) as websocket:
+        logging.info(f"Connected to {url}")
         while True:
             data = await websocket.recv()
             data_json = json.loads(data)
             kline = data_json['k']
-            if kline['x']:  # Check if the kline is closed
-                yield {
+            if kline['x']:
+                new_data = {
                     'timestamp': pd.to_datetime(kline['t'], unit='ms'),
-                    'open': float(kline['o']),
-                    'high': float(kline['h']),
-                    'low': float(kline['l']),
-                    'close': float(kline['c']),
-                    'volume': float(kline['v'])
+                    'close': float(kline['c'])
                 }
+                logging.info(f"Received new data: {new_data}")
+                yield new_data
 
-async def update_data(symbol, interval='1m', path='real_time_data.csv'):
-    data_stream = fetch_real_time_data(symbol, interval)
-    async for new_data in data_stream:
-        df = pd.DataFrame([new_data])
-        df.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
-        print(f"Appended new data: {new_data}")
+async def append_real_time_data_and_predict(symbol, num_predictions=10):
+    if os.path.exists('real_time_data.csv') and os.stat('real_time_data.csv').st_size != 0:
+        data = pd.read_csv('real_time_data.csv', parse_dates=['timestamp'], index_col='timestamp')
+    else:
+        data = pd.DataFrame(columns=['timestamp', 'close'])
+        data.set_index('timestamp', inplace=True)
 
+    async for new_data in fetch_real_time_data(symbol):
+        new_row = pd.DataFrame([new_data])
+        new_row.set_index('timestamp', inplace=True)
 
-get_historical_data('bitcoin','usd')
+        data = pd.concat([data, new_row])
+        data = add_features(data, ['ROC'])
+        logging.info(f"Appended new row, total records: {len(data)}")
+        data[['close']].to_csv('real_time_data.csv', mode='a', header=False, index=True)
+
+        predictions = []
+        last_60_candles = data[-60:].values
+
+        for _ in range(num_predictions):
+            scaled_data = scaler.transform(last_60_candles)
+            X_test = np.reshape(scaled_data, (1, 60, scaled_data.shape[1]))
+
+            # Dự đoán giá nến kế tiếp
+            predicted_price_scaled = model.predict(X_test)
+            predicted_price = scaler.inverse_transform(
+                np.concatenate((predicted_price_scaled, np.zeros((predicted_price_scaled.shape[0], scaled_data.shape[1] - 1))), axis=1)
+            )[:, 0]
+
+            predictions.append(predicted_price[0])
+
+            # Thêm giá trị dự đoán vào last_60_candles để dự đoán giá trị tiếp theo
+            last_60_candles = np.append(last_60_candles[1:], [[predicted_price[0], last_60_candles[-1][1]]], axis=0)
+
+        return predictions

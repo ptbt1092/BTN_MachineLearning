@@ -2,14 +2,15 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import dash_bootstrap_components as dbc
-from tensorflow.keras.models import load_model
-import numpy as np
 import plotly.graph_objs as go
 import pandas as pd
 from dash.dependencies import Input, Output, State
-from utils import get_historical_data
-from utils import add_features
-import torch
+from utils import append_real_time_data_and_predict, train_model_once, get_historical_data, fetch_real_time_data
+import asyncio
+import logging
+import concurrent.futures
+import os
+from datetime import datetime
 
 # Tạo ra một app (web server)
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP, "https://use.fontawesome.com/releases/v5.10.0/css/all.css"])
@@ -34,38 +35,6 @@ CSS3 = {
     "right": 0,
     "padding": "2rem 1rem",
 }
-
-def load_model_and_predict(coin_id, features, model_path, scaler, n_clicks):
-    model = load_model(model_path)
-    # Tạo dữ liệu mẫu để dự đoán
-    df = get_historical_data(coin_id, 'usd')
-    df = add_features(df, features)
-    df.dropna(inplace=True)
-
-    data = df.filter(['price'] + features)
-    dataset = data.values
-
-    scaled_data = scaler.transform(dataset)
-    seq_length = 60
-    start_idx = n_clicks * 7
-    end_idx = start_idx + 7
-    sample_data = scaled_data[start_idx:end_idx, :]
-
-    def create_sequences(data, seq_length):
-        xs = []
-        for i in range(len(data) - seq_length):
-            x = data[i:i+seq_length]
-            xs.append(x)
-        return np.array(xs)
-
-    x_sample = create_sequences(sample_data, seq_length)
-    x_sample = torch.tensor(x_sample, dtype=torch.float32)
-
-    predictions = model.predict(x_sample)
-    predictions = scaler.inverse_transform(np.concatenate((predictions, np.zeros((predictions.shape[0], x_sample.shape[2]-1))), axis=1))[:, 0]
-
-    return predictions
-
 
 method = [
     html.Li(
@@ -152,42 +121,62 @@ app.layout = html.Div([
 
     html.Div(id="page-content", style=CSS2),
 
-    html.Div([
-        html.H1("Crypto Price Analysis Dashboard",
-                style={"textAlign": "center", "color": "#7fa934"}),
-        html.Br(),
-        html.Div([
-            html.H3(id="dash-title",
-                    style={"textAlign": "center"}),
-
-            dcc.Dropdown(id='my-dropdown',
-                         options=[{'label': 'BTC-USD', 'value': 'BTC-USD'},
-                                  {'label': 'ETH-USD', 'value': 'ETH-USD'},
-                                  {'label': 'ADA-USD', 'value': 'ADA-USD'},
-                                  ],
-                         multi=True, value=['BTC-USD'],
-                         style={"display": "block", "margin-left": "auto",
-                                "margin-right": "0", "width": "60%"}),
-
-            dcc.Graph(id='compare'),
+    dcc.Tabs(id="tabs-example", value='tab-1', children=[
+        dcc.Tab(label='Predict Stock', value='tab-1', children=[
             html.Div([
-                dcc.Graph(id='next-prediction', style={"position": "relative"}),
-                html.Button('Predict Next Period', id='next-timeframe-button', n_clicks=0, style={
-                    "position": "absolute",
-                    "top": "820px",
-                    "left": "10px",
-                    "background-color": "#7fa934",
-                    "color": "white",
-                    "border": "none",
-                    "padding": "10px 20px",
-                    "cursor": "pointer"
-                })
-            ], className="dash-graph"),
+                html.H1("Crypto Price Analysis Dashboard",
+                        style={"textAlign": "center", "color": "#7fa934"}),
+                html.Br(),
+                html.Div([
+                    html.H3(id="dash-title",
+                            style={"textAlign": "center"}),
 
-        ], className="container"),
-    ],
-        style=CSS1,
-    ),
+                    dcc.Dropdown(id='my-dropdown',
+                                options=[{'label': 'BTC-USD', 'value': 'BTC-USD'},
+                                        {'label': 'ETH-USD', 'value': 'ETH-USD'},
+                                        {'label': 'ADA-USD', 'value': 'ADA-USD'},
+                                        ],
+                                multi=True, value=['BTC-USD'],
+                                style={"display": "block", "margin-left": "auto",
+                                        "margin-right": "0", "width": "60%"}),
+
+                    dcc.Graph(id='compare'),
+                    html.Div([
+                        dcc.Graph(id='next-prediction', style={"position": "relative"}),
+                        html.Button('Predict Next Period', id='next-timeframe-button', n_clicks=0, style={
+                            "position": "absolute",
+                            "top": "820px",
+                            "left": "10px",
+                            "background-color": "#7fa934",
+                            "color": "white",
+                            "border": "none",
+                            "padding": "10px 20px",
+                            "cursor": "pointer"
+                        })
+                    ], className="dash-graph"),
+                ], className="container"),
+            ],
+            style=CSS1)
+        ]),
+        dcc.Tab(label='Real-time Data', value='tab-2', children=[
+            html.Div([
+                html.H1("Real-time Crypto Data",
+                        style={"textAlign": "center", "color": "#7fa934"}),
+                html.Br(),
+                html.Div([
+                    dcc.Graph(id='real-time-graph'),
+                    html.Button('Start Real-time Data', id='start-realtime-button', n_clicks=0, style={
+                        "background-color": "#7fa934",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "10px 20px",
+                        "cursor": "pointer"
+                    })
+                ], className="container"),
+            ],
+            style=CSS1)
+        ])
+    ])
 ])
 
 # this function is used to toggle the is_open property of each Collapse
@@ -344,5 +333,75 @@ def update_next_prediction(selected_dropdown, radio_items_value, checklist_value
                                   yaxis={"title": "Price (USD)"})}
     return figure
 
+def clean_csv_file(file_path):
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+@app.callback(
+    Output('real-time-graph', 'figure'),
+    Input('start-realtime-button', 'n_clicks')
+)
+def update_real_time_graph(n_clicks):
+    if n_clicks > 0:
+        # Start fetching real-time data in a separate thread
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        executor.submit(start_event_loop)
+
+    # Kiểm tra và khởi tạo tệp nếu không tồn tại
+    if not os.path.exists('real_time_data.csv'):
+        open('real_time_data.csv', 'w').close()
+
+    # Read the real-time data file and update the graph
+    try:
+        data = pd.read_csv('real_time_data.csv', parse_dates=['timestamp'], index_col='timestamp')
+
+        # Chuyển đổi index thành DatetimeIndex nếu chưa phải
+        data.index = pd.to_datetime(data.index, errors='coerce', format='%Y-%m-%d %H:%M:%S')
+        data = data.dropna()  # Bỏ các hàng có giá trị thời gian không hợp lệ
+
+        # Lọc dữ liệu để chỉ hiển thị giá của ngày hiện tại
+        now = datetime.now()
+        today = now.date()
+        data = data[data.index.date == today]
+
+        trace = go.Scatter(x=data.index, y=data['close'], mode='markers+lines', name='Real-time BTC-USD')
+        
+        # Dự đoán nhiều giá nến tiếp theo
+        num_predictions = 10
+        predictions = asyncio.run(append_real_time_data_and_predict('btcusdt', num_predictions))
+        start_time = data.index[-1]
+        prediction_times = pd.date_range(start=start_time, periods=len(predictions) + 1, freq='1min')[1:]
+        trace_next_predictions = go.Scatter(x=prediction_times,
+                                           y=predictions,
+                                           mode='markers+lines',
+                                           marker=dict(color='red', size=8),
+                                           name='Next Predicted Prices')
+        
+        figure = {'data': [trace, trace_next_predictions],
+                  'layout': go.Layout(colorway=["#00d2ff"],
+                                      height=600,
+                                      xaxis={"title": "Date", "tickformat": "%H:%M"},
+                                      yaxis={"title": "Price (USD)"})}
+        return figure
+    except pd.errors.EmptyDataError:
+        # Nếu tệp trống, không cập nhật đồ thị
+        return go.Figure()
+
+def start_event_loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    logging.info("Starting event loop")
+    loop.run_until_complete(fetch_real_time_data('btcusdt'))
+
 if __name__ == '__main__':
+    # Ensure the model is trained once at the start
+    train_model_once('bitcoin', 'usd', ['ROC'])
+    
+    # Check and ensure historical data is added only once
+    if not os.path.exists('real_time_data.csv') or os.stat('real_time_data.csv').st_size == 0:
+
+        historical_data = get_historical_data('bitcoin', 'usd')
+        historical_data.rename(columns={"Datetime": "timestamp"}, inplace=True)
+        historical_data.to_csv('real_time_data.csv', index=False)
+
     app.run_server(debug=True, port=3000)
