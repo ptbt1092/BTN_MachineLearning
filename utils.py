@@ -107,7 +107,7 @@ async def fetch_real_time_data(symbol, interval='1m'):
                 logging.info(f"Received new data: {new_data}")
                 yield new_data
 
-async def append_real_time_data_and_predict(symbol, num_predictions=10):
+async def append_real_time_data_and_predict(symbol, num_predictions=5):
     file_path = 'real_time_data.csv'
     
     # Kiểm tra nếu file CSV tồn tại và có dữ liệu

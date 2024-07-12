@@ -10,6 +10,7 @@ import asyncio
 import logging
 import concurrent.futures
 import os
+import pytz
 from datetime import datetime
 
 # Tạo ra một app (web server)
@@ -197,7 +198,11 @@ app.layout = html.Div([
                         style={"textAlign": "center", "color": "#7fa934", "margin-top": "30px"}),
                 html.Br(),
                 html.Div([
-                    dcc.Graph(id='real-time-graph'),
+                    dcc.Loading(
+                        id="loading-real-time-graph",
+                        type="default",
+                        children=[dcc.Graph(id='real-time-graph')]
+                    ),
                     dcc.Interval(
                         id='interval-component',
                         interval=1*60*1000,  # Cập nhật mỗi phút
@@ -390,8 +395,11 @@ def update_real_time_graph(selected_tab, n_intervals):
             data.index = pd.to_datetime(data.index, errors='coerce', format='%Y-%m-%d %H:%M:%S')
             data = data.dropna()  # Bỏ các hàng có giá trị thời gian không hợp lệ
 
+            # Chuyển đổi múi giờ sang GMT+7
+            data.index = data.index.tz_localize('UTC').tz_convert('Asia/Bangkok')
+
             # Lọc dữ liệu để chỉ hiển thị giá của ngày hiện tại
-            now = datetime.now()
+            now = datetime.now(pytz.timezone('Asia/Bangkok'))
             today = now.date()
             data = data[data.index.date == today]
 
