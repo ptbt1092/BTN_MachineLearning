@@ -22,7 +22,7 @@ CSS1 = {
     "margin-right": "18rem"
 }
 CSS2 = {
-    "padding": "2rem 1rem",
+    "padding": "1.5rem 1rem",
     "margin-left": "18rem",  
     "margin-right": "2rem",
 }
@@ -31,9 +31,37 @@ CSS3 = {
     "width": "16rem",
     "height": "50%",    
     "position": "fixed",
-    "top": "0",
+    "top": "65px",
     "right": 0,
     "padding": "2rem 1rem",
+}
+
+# CSS cho các tab
+tabs_styles = {
+    'height': '65px'
+}
+tab_style = {
+    'borderBottom': '1px solid #d6d6d6',
+    'padding': '6px',
+    'fontWeight': 'bold',
+    'backgroundColor': '#f9f9f9',
+    'color': 'black',
+    'display': 'flex',
+    'justify-content': 'center',
+    'align-items': 'center',
+    'font-size': '20px'
+}
+
+tab_selected_style = {
+    'borderTop': '1px solid #d6d6d6',
+    'borderBottom': '2px solid #d6d6d6',
+    'backgroundColor': '#7fa934',
+    'color': 'white',
+    'padding': '6px',
+    'display': 'flex',
+    'justify-content': 'center',
+    'align-items': 'center',
+    'font-size': '20px'
 }
 
 method = [
@@ -109,21 +137,18 @@ feature = [
 ]
 
 app.layout = html.Div([
-    # side bar
-    html.Div([
-        html.H2("MENU",  style={"textAlign": "center"}),
-        html.Hr(),
-        dbc.Nav(method + feature, vertical=True),
-    ],
-        style=CSS3,
-        id="sidebar",
-    ),
-
-    html.Div(id="page-content", style=CSS2),
-
     dcc.Tabs(id="tabs-example", value='tab-1', children=[
-        dcc.Tab(label='Predict Stock', value='tab-1', children=[
+        dcc.Tab(label='Stock Prediction', value='tab-1', style=tab_style, selected_style=tab_selected_style, children=[
             html.Div([
+                html.Div([
+                    html.H2("MENU",  style={"textAlign": "center"}),
+                    html.Hr(),
+                    dbc.Nav(method + feature, vertical=True),
+                ],
+                    style=CSS3,
+                    id="sidebar",
+                ),
+                html.Div(id="page-content", style=CSS2),
                 html.H1("Crypto Price Analysis Dashboard",
                         style={"textAlign": "center", "color": "#7fa934"}),
                 html.Br(),
@@ -151,7 +176,7 @@ app.layout = html.Div([
                             type="default",
                             children=[dcc.Graph(id='next-prediction', style={"position": "relative"})]
                         ),
-                        html.Button('Predict Next Period', id='next-timeframe-button', n_clicks=0, style={
+                        html.Button('Next Timeframe', id='next-timeframe-button', n_clicks=0, style={
                             "position": "absolute",
                             "top": "870px",
                             "left": "10px",
@@ -166,27 +191,23 @@ app.layout = html.Div([
             ],
             style=CSS1)
         ]),
-        dcc.Tab(label='Real-time Data', value='tab-2', children=[
+        dcc.Tab(label='Real-time Data', value='tab-2', style=tab_style, selected_style=tab_selected_style, children=[
             html.Div([
-                html.H1("Real-time Crypto Data",
-                        style={"textAlign": "center", "color": "#7fa934"}),
+                html.H1("Real-time Prediction",
+                        style={"textAlign": "center", "color": "#7fa934", "margin-top": "30px"}),
                 html.Br(),
                 html.Div([
-                    dcc.Loading(
-                        id="loading-real-time",
-                        type="default",
-                        children=[dcc.Graph(id='real-time-graph')]
-                    ),
-                    # dcc.Interval(
-                    #     id='interval-component',
-                    #     interval=1*60*1000,  # Cập nhật mỗi phút
-                    #     n_intervals=0
-                    # )
+                    dcc.Graph(id='real-time-graph'),
+                    dcc.Interval(
+                        id='interval-component',
+                        interval=1*60*1000,  # Cập nhật mỗi phút
+                        n_intervals=0
+                    )
                 ], className="container"),
             ],
             style=CSS1)
         ])
-    ])
+    ], style=tabs_styles)
 ])
 
 # this function is used to toggle the is_open property of each Collapse
@@ -349,9 +370,9 @@ def clean_csv_file(file_path):
 
 @app.callback(
     Output('real-time-graph', 'figure'),
-    [Input('tabs-example', 'value')]
+    [Input('tabs-example', 'value'), Input('interval-component', 'n_intervals')]
 )
-def update_real_time_graph(selected_tab):
+def update_real_time_graph(selected_tab, n_intervals):
     if selected_tab == 'tab-2':
         # Start fetching real-time data in a separate thread
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
