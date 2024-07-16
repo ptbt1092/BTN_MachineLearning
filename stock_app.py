@@ -203,11 +203,11 @@ app.layout = html.Div([
                         type="default",
                         children=[dcc.Graph(id='real-time-graph')]
                     ),
-                    dcc.Interval(
-                        id='interval-component',
-                        interval=1*60*1000,  # Cập nhật mỗi phút
-                        n_intervals=0
-                    )
+                    # dcc.Interval(
+                    #     id='interval-component',
+                    #     interval=1*60*1000,  # Cập nhật mỗi phút
+                    #     n_intervals=0
+                    # )
                 ], className="container"),
             ],
             style=CSS1)
@@ -375,9 +375,11 @@ def clean_csv_file(file_path):
 
 @app.callback(
     Output('real-time-graph', 'figure'),
-    [Input('tabs-example', 'value'), Input('interval-component', 'n_intervals')]
+    [Input('tabs-example', 'value'), 
+    #  Input('interval-component', 'n_intervals')
+    ]
 )
-def update_real_time_graph(selected_tab, n_intervals):
+def update_real_time_graph(selected_tab):
     if selected_tab == 'tab-2':
         # Start fetching real-time data in a separate thread
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -396,7 +398,10 @@ def update_real_time_graph(selected_tab, n_intervals):
             data = data.dropna()  # Bỏ các hàng có giá trị thời gian không hợp lệ
 
             # Chuyển đổi múi giờ sang GMT+7
-            data.index = data.index.tz_localize('UTC').tz_convert('Asia/Bangkok')
+            if data.index.tz is None:
+                data.index = data.index.tz_localize('UTC').tz_convert('Asia/Bangkok')
+            else:
+                data.index = data.index.tz_convert('Asia/Bangkok')
 
             # Lọc dữ liệu để chỉ hiển thị giá của ngày hiện tại
             now = datetime.now(pytz.timezone('Asia/Bangkok'))

@@ -16,6 +16,8 @@ from keras.layers import Dense, LSTM, Dropout
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
 
+model_trained = False
+
 def add_features(df, features):
     if 'ROC' in features:
         df['ROC'] = df['close'].pct_change(periods=14) * 100
@@ -55,7 +57,10 @@ def get_historical_data(coin_id, vs_currency):
     return data
 
 def train_model_once(coin_id, vs_currency, features):
-    global model, scaler, training_data_len, dataset
+    global model, scaler, training_data_len, dataset, model_trained
+    if model_trained:
+        logging.info("Model already trained")
+        return
     df = get_historical_data(coin_id, vs_currency)
     df = add_features(df, features)
     df.dropna(inplace=True)
@@ -89,6 +94,7 @@ def train_model_once(coin_id, vs_currency, features):
     model.compile(optimizer='adam', loss='mean_squared_error')
     model.fit(x_train, y_train, batch_size=32, epochs=10)
 
+    model_trained = True
     logging.info("Model trained and scaler initialized")
 
 async def fetch_real_time_data(symbol, interval='1m'):
