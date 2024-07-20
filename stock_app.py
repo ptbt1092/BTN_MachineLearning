@@ -12,6 +12,10 @@ import concurrent.futures
 import os
 import pytz
 from datetime import datetime
+from threading import Lock
+
+# Khởi tạo đối tượng Lock
+csv_lock = Lock()
 
 # Tạo ra một app (web server)
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP, "https://use.fontawesome.com/releases/v5.10.0/css/all.css"])
@@ -376,7 +380,7 @@ def clean_csv_file(file_path):
 @app.callback(
     Output('real-time-graph', 'figure'),
     [Input('tabs-example', 'value'), 
-    #  Input('interval-component', 'n_intervals')
+    # Input('interval-component', 'n_intervals')
     ]
 )
 def update_real_time_graph(selected_tab):
@@ -389,47 +393,49 @@ def update_real_time_graph(selected_tab):
         if not os.path.exists('real_time_data.csv'):
             open('real_time_data.csv', 'w').close()
 
-        # Read the real-time data file and update the graph
-        try:
-            data = pd.read_csv('real_time_data.csv', parse_dates=['timestamp'], index_col='timestamp')
+        # Đảm bảo đồng bộ khi đọc file CSV
+        with csv_lock:
+            try:
+                data = pd.read_csv('real_time_data.csv', parse_dates=['timestamp'], index_col='timestamp')
 
-            # Chuyển đổi index thành DatetimeIndex nếu chưa phải
-            data.index = pd.to_datetime(data.index, errors='coerce', format='%Y-%m-%d %H:%M:%S')
-            data = data.dropna()  # Bỏ các hàng có giá trị thời gian không hợp lệ
+                # Chuyển đổi index thành DatetimeIndex nếu chưa phải
+                data.index = pd.to_datetime(data.index, errors='coerce', format='%Y-%m-%d %H:%M:%S')
+                data = data.dropna()  # Bỏ các hàng có giá trị thời gian không hợp lệ
 
-            # Chuyển đổi múi giờ sang GMT+7
-            if data.index.tz is None:
-                data.index = data.index.tz_localize('UTC').tz_convert('Asia/Bangkok')
-            else:
-                data.index = data.index.tz_convert('Asia/Bangkok')
+                # Chuyển đổi múi giờ sang GMT+7
+                if data.index.tz is None:
+                    data.index = data.index.tz_localize('UTC').tz_convert('Asia/Bangkok')
+                else:
+                    data.index = data.index.tz_convert('Asia/Bangkok')
 
-            # Lọc dữ liệu để chỉ hiển thị giá của ngày hiện tại
-            now = datetime.now(pytz.timezone('Asia/Bangkok'))
-            today = now.date()
-            data = data[data.index.date == today]
+                # Append real-time data and make predictions
+                num_predictions = 10
+                predictions = asyncio.run(append_real_time_data_and_predict('btcusdt', num_predictions))
+                
+                # Lọc dữ liệu để chỉ hiển thị giá của ngày hiện tại
+                now = datetime.now(pytz.timezone('Asia/Bangkok'))
+                today = now.date()
+                data = data[data.index.date == today]
 
-            trace = go.Scatter(x=data.index, y=data['close'], mode='markers+lines', name='Real-time BTC-USD')
-            
-            # Dự đoán nhiều giá nến tiếp theo
-            num_predictions = 10
-            predictions = asyncio.run(append_real_time_data_and_predict('btcusdt', num_predictions))
-            start_time = data.index[-1]
-            prediction_times = pd.date_range(start=start_time, periods=len(predictions) + 1, freq='1min')[1:]
-            trace_next_predictions = go.Scatter(x=prediction_times,
-                                               y=predictions,
-                                               mode='markers+lines',
-                                               marker=dict(color='red', size=8),
-                                               name='Next Predicted Prices')
-            
-            figure = {'data': [trace, trace_next_predictions],
-                      'layout': go.Layout(colorway=["#00d2ff"],
-                                          height=600,
-                                          xaxis={"title": "Date", "tickformat": "%H:%M"},
-                                          yaxis={"title": "Price (USD)"})}
-            return figure
-        except pd.errors.EmptyDataError:
-            # Nếu tệp trống, không cập nhật đồ thị
-            return go.Figure()
+                trace = go.Scatter(x=data.index, y=data['close'], mode='markers+lines', name='Real-time BTC-USD')
+
+                start_time = data.index[-1] + pd.Timedelta(minutes=1)
+                prediction_times = pd.date_range(start=start_time, periods=len(predictions), freq='1min')
+                trace_next_predictions = go.Scatter(x=prediction_times,
+                                                   y=predictions,
+                                                   mode='markers+lines',
+                                                   marker=dict(color='red', size=8),
+                                                   name='Next Predicted Prices')
+
+                figure = {'data': [trace, trace_next_predictions],
+                          'layout': go.Layout(colorway=["#00d2ff"],
+                                              height=600,
+                                              xaxis={"title": "Date", "tickformat": "%H:%M"},
+                                              yaxis={"title": "Price (USD)"})}
+                return figure
+            except pd.errors.EmptyDataError:
+                # Nếu tệp trống, không cập nhật đồ thị
+                return go.Figure()
 
     return go.Figure()
 

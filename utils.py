@@ -12,6 +12,10 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, LSTM, Dropout
+from threading import Lock
+
+# Khởi tạo đối tượng Lock
+csv_lock = Lock()
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
@@ -110,18 +114,19 @@ async def fetch_real_time_data(symbol, interval='1m'):
                     'timestamp': pd.to_datetime(kline['t'], unit='ms'),
                     'close': float(kline['c'])
                 }
-                logging.info(f"Received new data: {new_data}")
+                # logging.info(f"Received new data: {new_data}")
                 yield new_data
 
 async def append_real_time_data_and_predict(symbol, num_predictions=5):
     file_path = 'real_time_data.csv'
     
     # Kiểm tra nếu file CSV tồn tại và có dữ liệu
-    if os.path.exists(file_path) and os.stat(file_path).st_size != 0:
-        data = pd.read_csv(file_path, parse_dates=['timestamp'], index_col='timestamp')
-    else:
-        data = pd.DataFrame(columns=['timestamp', 'close'])
-        data.set_index('timestamp', inplace=True)
+    with csv_lock:
+        if os.path.exists(file_path) and os.stat(file_path).st_size != 0:
+            data = pd.read_csv(file_path, parse_dates=['timestamp'], index_col='timestamp')
+        else:
+            data = pd.DataFrame(columns=['timestamp', 'close'])
+            data.set_index('timestamp', inplace=True)
     
     async for new_data in fetch_real_time_data(symbol):
         new_row = pd.DataFrame([new_data])
@@ -133,9 +138,10 @@ async def append_real_time_data_and_predict(symbol, num_predictions=5):
             data = add_features(data, ['ROC'])
             logging.info(f"Appended new row, total records: {len(data)}")
             
-            # Lưu lại toàn bộ dữ liệu vào file CSV (loại bỏ trùng lặp)
-            data = data[~data.index.duplicated(keep='last')]
-            data[['close']].to_csv(file_path, mode='w', header=True, index=True)
+            with csv_lock:
+                # Lưu lại toàn bộ dữ liệu vào file CSV (loại bỏ trùng lặp)
+                data = data[~data.index.duplicated(keep='last')]
+                data[['close']].to_csv(file_path, mode='w', header=True, index=True)
         
         predictions = []
         last_60_candles = data[-60:].values
